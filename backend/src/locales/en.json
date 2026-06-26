@@ -1,0 +1,79 @@
+{
+  "common": {
+    "app_name": "MeuBanco GW",
+    "tagline": "Payment System - Guinea-Bissau",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "search": "Search",
+    "filter": "Filter",
+    "export": "Export",
+    "print": "Print"
+  },
+  "auth": {
+    "login": "Login",
+    "register": "Create Account",
+    "email": "Email",
+    "password": "Password",
+    "forgot_password": "Forgot password?",
+    "biometric_login": "Biometric Login",
+    "two_factor": "Two-Factor Authentication",
+    "logout": "Logout"
+  },
+  "transaction": {
+    "send": "Send Money",
+    "receive": "Receive",
+    "transfer": "Transfer",
+    "payment": "Payment",
+    "deposit": "Deposit",
+    "withdrawal": "Withdrawal",
+    "orange_money": "Orange Money",
+    "mobile_money": "Mobile Money",
+    "pix": "PIX",
+    "iban": "IBAN",
+    "bank_transfer": "Bank Transfer",
+    "amount": "Amount",
+    "fee": "Fee",
+    "total": "Total",
+    "description": "Description",
+    "category": "Category",
+    "receipt": "Receipt",
+    "status": "Status",
+    "date": "Date",
+    "reference": "Reference"
+  },
+  "account": {
+    "balance": "Balance",
+    "statement": "Statement",
+    "monthly_report": "Monthly Report",
+    "budget": "Budget",
+    "settings": "Settings",
+    "security": "Security",
+    "biometric": "Biometrics",
+    "linked_accounts": "Linked Accounts"
+  },
+  "support": {
+    "title": "Support",
+    "ticket": "Ticket",
+    "chat": "Chat",
+    "faq": "FAQ",
+    "ai_assistant": "AI Assistant"
+  },
+  "notification": {
+    "transaction_sent": "Transfer sent",
+    "transaction_received": "Transfer received",
+    "budget_alert": "Budget alert",
+    "security_alert": "Security alert"
+  },
+  "errors": {
+    "insufficient_balance": "Insufficient balance",
+    "invalid_account": "Invalid account",
+    "transaction_failed": "Transaction failed",
+    "network_error": "Network error"
+  }
+}

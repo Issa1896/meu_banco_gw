@@ -1,0 +1,79 @@
+{
+  "common": {
+    "app_name": "MeuBanco GW",
+    "tagline": "Sistema de Pagamentos - Guiné-Bissau",
+    "loading": "Carregando...",
+    "error": "Erro",
+    "success": "Sucesso",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "save": "Salvar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "search": "Pesquisar",
+    "filter": "Filtrar",
+    "export": "Exportar",
+    "print": "Imprimir"
+  },
+  "auth": {
+    "login": "Entrar",
+    "register": "Criar Conta",
+    "email": "Email",
+    "password": "Senha",
+    "forgot_password": "Esqueceu a senha?",
+    "biometric_login": "Login Biométrico",
+    "two_factor": "Autenticação de Dois Fatores",
+    "logout": "Sair"
+  },
+  "transaction": {
+    "send": "Enviar Dinheiro",
+    "receive": "Receber",
+    "transfer": "Transferência",
+    "payment": "Pagamento",
+    "deposit": "Depósito",
+    "withdrawal": "Saque",
+    "orange_money": "Orange Money",
+    "mobile_money": "Mobile Money",
+    "pix": "PIX",
+    "iban": "IBAN",
+    "bank_transfer": "Transferência Bancária",
+    "amount": "Valor",
+    "fee": "Taxa",
+    "total": "Total",
+    "description": "Descrição",
+    "category": "Categoria",
+    "receipt": "Comprovante",
+    "status": "Status",
+    "date": "Data",
+    "reference": "Referência"
+  },
+  "account": {
+    "balance": "Saldo",
+    "statement": "Extrato",
+    "monthly_report": "Relatório Mensal",
+    "budget": "Orçamento",
+    "settings": "Configurações",
+    "security": "Segurança",
+    "biometric": "Biometria",
+    "linked_accounts": "Contas Vinculadas"
+  },
+  "support": {
+    "title": "Suporte",
+    "ticket": "Ticket",
+    "chat": "Chat",
+    "faq": "Perguntas Frequentes",
+    "ai_assistant": "Assistente IA"
+  },
+  "notification": {
+    "transaction_sent": "Transferência enviada",
+    "transaction_received": "Transferência recebida",
+    "budget_alert": "Alerta de orçamento",
+    "security_alert": "Alerta de segurança"
+  },
+  "errors": {
+    "insufficient_balance": "Saldo insuficiente",
+    "invalid_account": "Conta inválida",
+    "transaction_failed": "Transação falhou",
+    "network_error": "Erro de rede"
+  }
+}

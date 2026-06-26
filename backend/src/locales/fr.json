@@ -1,0 +1,79 @@
+{
+  "common": {
+    "app_name": "MeuBanco GW",
+    "tagline": "Système de Paiement - Guinée-Bissau",
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "success": "Succès",
+    "confirm": "Confirmer",
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "search": "Rechercher",
+    "filter": "Filtrer",
+    "export": "Exporter",
+    "print": "Imprimer"
+  },
+  "auth": {
+    "login": "Connexion",
+    "register": "Créer un Compte",
+    "email": "Email",
+    "password": "Mot de passe",
+    "forgot_password": "Mot de passe oublié?",
+    "biometric_login": "Connexion Biométrique",
+    "two_factor": "Authentification à Deux Facteurs",
+    "logout": "Déconnexion"
+  },
+  "transaction": {
+    "send": "Envoyer de l'Argent",
+    "receive": "Recevoir",
+    "transfer": "Transfert",
+    "payment": "Paiement",
+    "deposit": "Dépôt",
+    "withdrawal": "Retrait",
+    "orange_money": "Orange Money",
+    "mobile_money": "Mobile Money",
+    "pix": "PIX",
+    "iban": "IBAN",
+    "bank_transfer": "Virement Bancaire",
+    "amount": "Montant",
+    "fee": "Frais",
+    "total": "Total",
+    "description": "Description",
+    "category": "Catégorie",
+    "receipt": "Reçu",
+    "status": "Statut",
+    "date": "Date",
+    "reference": "Référence"
+  },
+  "account": {
+    "balance": "Solde",
+    "statement": "Relevé",
+    "monthly_report": "Rapport Mensuel",
+    "budget": "Budget",
+    "settings": "Paramètres",
+    "security": "Sécurité",
+    "biometric": "Biométrie",
+    "linked_accounts": "Comptes Liés"
+  },
+  "support": {
+    "title": "Support",
+    "ticket": "Ticket",
+    "chat": "Chat",
+    "faq": "FAQ",
+    "ai_assistant": "Assistant IA"
+  },
+  "notification": {
+    "transaction_sent": "Transfert envoyé",
+    "transaction_received": "Transfert reçu",
+    "budget_alert": "Alerte budget",
+    "security_alert": "Alerte sécurité"
+  },
+  "errors": {
+    "insufficient_balance": "Solde insuffisant",
+    "invalid_account": "Compte invalide",
+    "transaction_failed": "Échec de la transaction",
+    "network_error": "Erreur réseau"
+  }
+}

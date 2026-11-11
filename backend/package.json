@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "jest"
+    "test": "jest",
+    "ledger:backfill": "node src/scripts/ledger-backfill.js"
   },
   "dependencies": {
     "agenda": "^5.0.0",

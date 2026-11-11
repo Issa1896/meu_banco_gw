@@ -15,6 +15,7 @@ const User = require('../src/models/User');
 const Transaction = require('../src/models/Transaction');
 const Notification = require('../src/models/Notification');
 const AuditLog = require('../src/models/AuditLog');
+const JournalEntry = require('../src/models/JournalEntry');
 const { query } = require('./helpers');
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -49,7 +50,7 @@ const applyUpdate = (doc, update, session) => {
 };
 
 const createFakeDb = ({ users }) => {
-  const db = { users, transactions: [], notifications: [] };
+  const db = { users, transactions: [], notifications: [], journal: [] };
 
   // ---- sessões / transações
   jest.spyOn(mongoose, 'startSession').mockImplementation(async () => {
@@ -118,6 +119,51 @@ const createFakeDb = ({ users }) => {
     applyUpdate(doc, update, opts.session);
     return doc;
   });
+
+  // ---- JournalEntry (livro-razão)
+  jest.spyOn(JournalEntry, 'create').mockImplementation(async (docs, opts = {}) => {
+    await tick();
+    const list = (Array.isArray(docs) ? docs : [docs]).map((d) => new JournalEntry(d));
+    list.forEach((e) => {
+      const err = e.validateSync(); // valida partidas dobradas de verdade
+      if (err) throw err;
+    });
+    db.journal.push(...list);
+    if (opts.session) {
+      opts.session.undo.push(() => { db.journal = db.journal.filter((e) => !list.includes(e)); });
+    }
+    return list;
+  });
+  // Mesmo resultado do pipeline $unwind lines → $group por conta
+  jest.spyOn(JournalEntry, 'aggregate').mockImplementation(async () => {
+    const acc = new Map();
+    db.journal.forEach((e) => e.lines.forEach((l) => {
+      const row = acc.get(l.account) || { _id: l.account, debit: 0, credit: 0, entries: 0 };
+      row.debit += l.debit || 0;
+      row.credit += l.credit || 0;
+      row.entries += 1;
+      acc.set(l.account, row);
+    }));
+    return [...acc.values()].sort((a, b) => a._id.localeCompare(b._id));
+  });
+  jest.spyOn(JournalEntry, 'find').mockImplementation((filter) => {
+    const account = filter['lines.account'];
+    let rows = db.journal.filter((e) => e.lines.some((l) => l.account === account))
+      .sort((a, b) => b.postedAt - a.postedAt).map((e) => e.toObject());
+    const q = {
+      sort() { return q; },
+      skip(n) { rows = rows.slice(n); return q; },
+      limit(n) { rows = rows.slice(0, n); return q; },
+      lean() { return Promise.resolve(rows); },
+    };
+    return q;
+  });
+  jest.spyOn(User, 'find').mockImplementation(() => ({
+    select() { return this; },
+    lean: () => Promise.resolve(db.users.map((u) => ({
+      _id: u._id, name: u.name, accountNumber: u.accountNumber, balance: u.balance,
+    }))),
+  }));
 
   // ---- Notification / AuditLog
   jest.spyOn(Notification, 'insertMany').mockImplementation(async (docs, opts = {}) => {

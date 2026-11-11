@@ -17,6 +17,7 @@ import AdminUsers from './pages/admin/Users';
 import AdminTransactions from './pages/admin/AdminTransactions';
 import AdminTickets from './pages/admin/Tickets';
 import AdminAnalytics from './pages/admin/Analytics';
+import AdminLedger from './pages/admin/Ledger';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="transactions" element={<AdminTransactions />} />
           <Route path="tickets" element={<AdminTickets />} />
           <Route path="analytics" element={<AdminAnalytics />} />
+          <Route path="ledger" element={<AdminLedger />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" />} />

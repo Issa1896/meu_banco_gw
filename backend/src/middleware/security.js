@@ -23,6 +23,25 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Instâncias separadas: cada uma tem seu próprio contador
+const makeMfaLimiter = () => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Muitas tentativas de verificação. Tente novamente em 15 minutos' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const mfaLimiter = makeMfaLimiter(); // login: /verify-2fa
+const mfaManageLimiter = makeMfaLimiter(); // /2fa/enable e /2fa/disable
+
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Muitas solicitações de redefinição. Tente novamente mais tarde' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const transferLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 10,
@@ -48,6 +67,9 @@ const sanitizeInput = (req, res, next) => {
 module.exports = {
   securityHeaders,
   loginLimiter,
+  mfaLimiter,
+  mfaManageLimiter,
+  passwordResetLimiter,
   apiLimiter,
   transferLimiter,
   validate2FA,

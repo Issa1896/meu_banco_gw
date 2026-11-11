@@ -1,19 +1,20 @@
 const winston = require('winston');
 
 const logger = winston.createLogger({
+  silent: process.env.LOG_SILENT === 'true',
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  transports: [
+  transports: process.env.NODE_ENV === 'test' ? [new winston.transports.Console()] : [
     new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
     new winston.transports.File({ filename: 'logs/combined.log' }),
   ],
 });
 
-if (process.env.NODE_ENV !== 'production') {
+if (!['production', 'test'].includes(process.env.NODE_ENV)) {
   logger.add(new winston.transports.Console({
     format: winston.format.combine(
       winston.format.colorize(),

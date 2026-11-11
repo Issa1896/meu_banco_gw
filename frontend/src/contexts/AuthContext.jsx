@@ -36,7 +36,7 @@ export function AuthProvider({ children }) {
     const { data } = await authAPI.login(credentials);
 
     if (data.requires2FA) {
-      return { requires2FA: true, userId: data.userId };
+      return { requires2FA: true, mfaToken: data.mfaToken };
     }
 
     setUser(data.user);

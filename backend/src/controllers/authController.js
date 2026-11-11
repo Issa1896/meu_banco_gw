@@ -1,24 +1,50 @@
-const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const { validationResult } = require('express-validator');
 const logger = require('../utils/logger');
+const { encrypt, decrypt } = require('../utils/encryption');
+const { sendMail } = require('../utils/mailer');
+const {
+  signToken, verifyToken, generateAuthTokens, hashToken, safeEqualHex,
+} = require('../utils/tokens');
 
-const generateTokens = (userId, role) => {
-  const accessToken = jwt.sign(
-    { id: userId, role },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
-  const refreshToken = jwt.sign(
-    { id: userId, type: 'refresh' },
-    process.env.JWT_SECRET,
-    { expiresIn: '30d' }
-  );
-  return { accessToken, refreshToken };
+const MAX_LOGIN_ATTEMPTS = 5;
+const MAX_2FA_ATTEMPTS = 5;
+const LOCK_MINUTES = 15;
+const RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+const GENERIC_RESET_MESSAGE = 'Se o email estiver cadastrado, você receberá as instruções de redefinição';
+
+/** Emite access + refresh e guarda somente o hash do refresh no usuário. */
+const issueSession = (user) => {
+  const tokens = generateAuthTokens(user);
+  user.refreshTokenHash = hashToken(tokens.refreshToken);
+  return tokens;
 };
+
+/** Verifica um código TOTP contra um segredo cifrado. */
+const verifyTotp = (encryptedSecret, token) => {
+  if (!encryptedSecret || !/^\d{6}$/.test(String(token || ''))) return false;
+  return speakeasy.totp.verify({
+    secret: decrypt(encryptedSecret),
+    encoding: 'base32',
+    token: String(token),
+    window: 1, // ±30 s de tolerância de relógio
+  });
+};
+
+// Hash bcrypt (mesmo custo do model) usado só para igualar o tempo de resposta
+// quando o email não existe, evitando enumeração de contas por timing.
+let dummyHash = null;
+const bcryptDummyCompare = async (password) => {
+  if (!dummyHash) dummyHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+  return bcrypt.compare(String(password || ''), dummyHash);
+};
+
+const audit = (data) => AuditLog.create(data).catch((err) => logger.error('Falha no AuditLog:', err));
 
 exports.register = async (req, res) => {
   try {
@@ -39,7 +65,8 @@ exports.register = async (req, res) => {
       accountNumber: `GW${Date.now()}${Math.floor(Math.random() * 1000)}`,
     });
 
-    const tokens = generateTokens(user._id, user.role);
+    const tokens = issueSession(user);
+    await user.save();
 
     await AuditLog.create({
       user: user._id,
@@ -64,9 +91,14 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    }
 
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
+      // Mesmo custo de bcrypt para não revelar se o email existe (timing)
+      await bcryptDummyCompare(password);
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
@@ -77,44 +109,39 @@ exports.login = async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       user.loginAttempts += 1;
-      if (user.loginAttempts >= 5) {
-        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+      if (user.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        user.lockUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000);
+        user.loginAttempts = 0;
       }
       await user.save();
+      audit({
+        user: user._id, action: 'LOGIN_FAILED', resource: 'User', resourceId: user._id,
+        status: 'failure', severity: 'warning', ipAddress: req.ip, userAgent: req.headers['user-agent'],
+      });
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
     user.loginAttempts = 0;
     user.lockUntil = undefined;
-    user.lastLogin = new Date();
 
     if (user.twoFactorEnabled) {
-      user.save();
-      return res.json({
-        requires2FA: true,
-        userId: user._id,
-        message: 'Código 2FA necessário',
-      });
+      await user.save();
+      // Token de curta duração que prova que a etapa da senha foi concluída.
+      // Só ele é aceito em /verify-2fa — o userId sozinho não basta.
+      const mfaToken = signToken('mfa_pending', { id: user._id.toString() });
+      return res.json({ requires2FA: true, mfaToken, message: 'Código 2FA necessário' });
     }
 
-    const tokens = generateTokens(user._id, user.role);
-    user.refreshToken = tokens.refreshToken;
+    user.lastLogin = new Date();
+    const tokens = issueSession(user);
     await user.save();
 
-    await AuditLog.create({
-      user: user._id,
-      action: 'USER_LOGIN',
-      resource: 'User',
-      resourceId: user._id,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
+    audit({
+      user: user._id, action: 'USER_LOGIN', resource: 'User', resourceId: user._id,
+      ipAddress: req.ip, userAgent: req.headers['user-agent'],
     });
 
-    res.json({
-      message: 'Login realizado com sucesso',
-      user: user.toJSON(),
-      ...tokens,
-    });
+    res.json({ message: 'Login realizado com sucesso', user: user.toJSON(), ...tokens });
   } catch (error) {
     logger.error('Erro no login:', error);
     res.status(500).json({ error: 'Erro ao fazer login' });
@@ -123,33 +150,53 @@ exports.login = async (req, res) => {
 
 exports.verify2FA = async (req, res) => {
   try {
-    const { userId, token } = req.body;
-    const user = await User.findById(userId);
-
-    if (!user || !user.twoFactorEnabled) {
-      return res.status(400).json({ error: '2FA não configurado' });
+    const { mfaToken, token } = req.body;
+    if (!mfaToken || !token) {
+      return res.status(400).json({ error: 'mfaToken e código são obrigatórios' });
     }
 
-    const verified = speakeasy.totp.verify({
-      secret: user.twoFactorSecret,
-      encoding: 'base32',
-      token,
-      window: 2,
-    });
+    let decoded;
+    try {
+      decoded = verifyToken(mfaToken, 'mfa_pending');
+    } catch {
+      return res.status(401).json({ error: 'Sessão de login expirada. Entre novamente' });
+    }
 
-    if (!verified) {
+    const user = await User.findById(decoded.id).select('+twoFactorSecret');
+    if (!user || !user.twoFactorEnabled) {
+      return res.status(401).json({ error: 'Sessão de login inválida' });
+    }
+
+    if (user.twoFactorLockUntil && user.twoFactorLockUntil > Date.now()) {
+      return res.status(423).json({ error: 'Muitas tentativas de 2FA. Tente novamente mais tarde' });
+    }
+
+    if (!verifyTotp(user.twoFactorSecret, token)) {
+      user.twoFactorFailedAttempts += 1;
+      if (user.twoFactorFailedAttempts >= MAX_2FA_ATTEMPTS) {
+        user.twoFactorLockUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000);
+        user.twoFactorFailedAttempts = 0;
+      }
+      await user.save();
+      audit({
+        user: user._id, action: '2FA_FAILED', resource: 'User', resourceId: user._id,
+        status: 'failure', severity: 'warning', ipAddress: req.ip,
+      });
       return res.status(401).json({ error: 'Código 2FA inválido' });
     }
 
-    const tokens = generateTokens(user._id, user.role);
-    user.refreshToken = tokens.refreshToken;
+    user.twoFactorFailedAttempts = 0;
+    user.twoFactorLockUntil = undefined;
+    user.lastLogin = new Date();
+    const tokens = issueSession(user);
     await user.save();
 
-    res.json({
-      message: '2FA verificado com sucesso',
-      user: user.toJSON(),
-      ...tokens,
+    audit({
+      user: user._id, action: 'USER_LOGIN', resource: 'User', resourceId: user._id,
+      details: { mfa: true }, ipAddress: req.ip, userAgent: req.headers['user-agent'],
     });
+
+    res.json({ message: '2FA verificado com sucesso', user: user.toJSON(), ...tokens });
   } catch (error) {
     logger.error('Erro na verificação 2FA:', error);
     res.status(500).json({ error: 'Erro na verificação 2FA' });
@@ -158,14 +205,21 @@ exports.verify2FA = async (req, res) => {
 
 exports.setup2FA = async (req, res) => {
   try {
-    const secret = speakeasy.generateSecret({
-      name: `MeuBancoGW:${req.user.email}`,
-    });
+    if (req.user.twoFactorEnabled) {
+      return res.status(400).json({ error: '2FA já está ativo' });
+    }
+
+    const secret = speakeasy.generateSecret({ name: `MeuBancoGW:${req.user.email}` });
+
+    // O segredo fica no servidor (cifrado) até ser confirmado em /2fa/enable
+    req.user.twoFactorPendingSecret = encrypt(secret.base32);
+    req.user.twoFactorPendingExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await req.user.save();
 
     const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
 
     res.json({
-      secret: secret.base32,
+      secret: secret.base32, // exibido uma vez para digitação manual no app
       qrCode: qrCodeUrl,
       message: 'Escaneie o QR Code com seu app autenticador',
     });
@@ -177,29 +231,29 @@ exports.setup2FA = async (req, res) => {
 
 exports.enable2FA = async (req, res) => {
   try {
-    const { secret, token } = req.body;
+    const { token } = req.body;
+    const user = await User.findById(req.user._id)
+      .select('+twoFactorPendingSecret +twoFactorPendingExpires');
 
-    const verified = speakeasy.totp.verify({
-      secret,
-      encoding: 'base32',
-      token,
-      window: 2,
-    });
+    if (!user.twoFactorPendingSecret || !user.twoFactorPendingExpires
+      || user.twoFactorPendingExpires < new Date()) {
+      return res.status(400).json({ error: 'Configuração de 2FA expirada. Comece novamente' });
+    }
 
-    if (!verified) {
+    if (!verifyTotp(user.twoFactorPendingSecret, token)) {
       return res.status(400).json({ error: 'Código de verificação inválido' });
     }
 
-    req.user.twoFactorEnabled = true;
-    req.user.twoFactorSecret = secret;
-    await req.user.save();
+    user.twoFactorEnabled = true;
+    user.twoFactorMethod = 'app';
+    user.twoFactorSecret = user.twoFactorPendingSecret;
+    user.twoFactorPendingSecret = undefined;
+    user.twoFactorPendingExpires = undefined;
+    await user.save();
 
-    await AuditLog.create({
-      user: req.user._id,
-      action: '2FA_ENABLED',
-      resource: 'User',
-      resourceId: req.user._id,
-      severity: 'warning',
+    audit({
+      user: user._id, action: '2FA_ENABLED', resource: 'User', resourceId: user._id,
+      severity: 'warning', ipAddress: req.ip,
     });
 
     res.json({ message: '2FA ativado com sucesso' });
@@ -211,20 +265,36 @@ exports.enable2FA = async (req, res) => {
 
 exports.disable2FA = async (req, res) => {
   try {
-    req.user.twoFactorEnabled = false;
-    req.user.twoFactorSecret = undefined;
-    await req.user.save();
+    const { password, token } = req.body;
+    const user = await User.findById(req.user._id).select('+twoFactorSecret');
 
-    await AuditLog.create({
-      user: req.user._id,
-      action: '2FA_DISABLED',
-      resource: 'User',
-      resourceId: req.user._id,
-      severity: 'warning',
+    if (!user.twoFactorEnabled) {
+      return res.status(400).json({ error: '2FA não está ativo' });
+    }
+
+    // Desativar 2FA exige senha + código atual
+    const passwordOk = typeof password === 'string' && await user.comparePassword(password);
+    if (!passwordOk || !verifyTotp(user.twoFactorSecret, token)) {
+      audit({
+        user: user._id, action: '2FA_DISABLE_FAILED', resource: 'User', resourceId: user._id,
+        status: 'failure', severity: 'warning', ipAddress: req.ip,
+      });
+      return res.status(401).json({ error: 'Senha ou código 2FA inválidos' });
+    }
+
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = undefined;
+    user.twoFactorMethod = undefined;
+    await user.save();
+
+    audit({
+      user: user._id, action: '2FA_DISABLED', resource: 'User', resourceId: user._id,
+      severity: 'warning', ipAddress: req.ip,
     });
 
     res.json({ message: '2FA desativado' });
   } catch (error) {
+    logger.error('Erro ao desativar 2FA:', error);
     res.status(500).json({ error: 'Erro ao desativar 2FA' });
   }
 };
@@ -232,22 +302,29 @@ exports.disable2FA = async (req, res) => {
 exports.refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) {
+    if (!refreshToken || typeof refreshToken !== 'string') {
       return res.status(400).json({ error: 'Refresh token é obrigatório' });
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
-    if (decoded.type !== 'refresh') {
-      return res.status(401).json({ error: 'Token inválido' });
-    }
+    const decoded = verifyToken(refreshToken, 'refresh');
+    const user = await User.findById(decoded.id).select('+refreshTokenHash');
 
-    const user = await User.findById(decoded.id);
-    if (!user || user.refreshToken !== refreshToken) {
+    if (!user || user.status !== 'active') {
       return res.status(401).json({ error: 'Token inválido ou expirado' });
     }
 
-    const tokens = generateTokens(user._id, user.role);
-    user.refreshToken = tokens.refreshToken;
+    if (!safeEqualHex(user.refreshTokenHash, hashToken(refreshToken))) {
+      // Refresh token antigo reapresentado: possível roubo. Encerra a sessão.
+      user.refreshTokenHash = undefined;
+      await user.save();
+      audit({
+        user: user._id, action: 'REFRESH_TOKEN_REUSE', resource: 'User', resourceId: user._id,
+        status: 'failure', severity: 'critical', ipAddress: req.ip,
+      });
+      return res.status(401).json({ error: 'Token inválido ou expirado' });
+    }
+
+    const tokens = issueSession(user); // rotação: o refresh anterior deixa de valer
     await user.save();
 
     res.json(tokens);
@@ -258,15 +335,9 @@ exports.refreshToken = async (req, res) => {
 
 exports.logout = async (req, res) => {
   try {
-    req.user.refreshToken = undefined;
-    await req.user.save();
+    await User.updateOne({ _id: req.user._id }, { $unset: { refreshTokenHash: 1 } });
 
-    await AuditLog.create({
-      user: req.user._id,
-      action: 'USER_LOGOUT',
-      resource: 'User',
-      resourceId: req.user._id,
-    });
+    audit({ user: req.user._id, action: 'USER_LOGOUT', resource: 'User', resourceId: req.user._id });
 
     res.json({ message: 'Logout realizado com sucesso' });
   } catch (error) {
@@ -277,55 +348,84 @@ exports.logout = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({ error: 'Email não encontrado' });
+    if (typeof email !== 'string' || !email.trim()) {
+      return res.status(400).json({ error: 'Email é obrigatório' });
     }
 
-    const resetToken = jwt.sign(
-      { id: user._id, type: 'password_reset' },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
 
-    user.passwordResetToken = resetToken;
-    user.passwordResetExpires = new Date(Date.now() + 3600000);
+    // Resposta idêntica exista ou não o email (evita enumeração de contas)
+    if (!user || user.status === 'blocked') {
+      return res.json({ message: GENERIC_RESET_MESSAGE });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = hashToken(resetToken); // só o hash vai para o banco
+    user.passwordResetExpires = new Date(Date.now() + RESET_TOKEN_TTL_MS);
     await user.save();
 
-    // Enviar email com o token
-    res.json({ message: 'Instruções de reset enviadas para seu email', resetToken });
+    const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim();
+    const link = `${baseUrl}/reset-password?token=${resetToken}`;
+
+    try {
+      await sendMail({
+        to: user.email,
+        subject: 'MeuBanco GW — redefinição de senha',
+        text: `Olá, ${user.name}.\n\nPara redefinir sua senha, acesse (válido por 30 minutos):\n${link}\n\nSe não foi você, ignore este email.`,
+      });
+    } catch (mailError) {
+      logger.error('Falha ao enviar email de reset:', mailError);
+    }
+
+    audit({
+      user: user._id, action: 'PASSWORD_RESET_REQUESTED', resource: 'User', resourceId: user._id,
+      severity: 'warning', ipAddress: req.ip,
+    });
+
+    res.json({ message: GENERIC_RESET_MESSAGE });
   } catch (error) {
+    logger.error('Erro no forgot-password:', error);
     res.status(500).json({ error: 'Erro ao solicitar reset de senha' });
   }
 };
 
 exports.resetPassword = async (req, res) => {
   try {
-    const { token, password } = req.body;
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (decoded.type !== 'password_reset') {
-      return res.status(400).json({ error: 'Token inválido' });
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Dados inválidos', details: errors.array() });
     }
 
-    const user = await User.findById(decoded.id);
-    if (!user || user.passwordResetToken !== token) {
+    const { token, password } = req.body;
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
       return res.status(400).json({ error: 'Token inválido ou expirado' });
     }
 
-    if (user.passwordResetExpires < new Date()) {
-      return res.status(400).json({ error: 'Token expirado' });
+    const user = await User.findOne({
+      passwordResetToken: hashToken(token),
+      passwordResetExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'Token inválido ou expirado' });
     }
 
-    user.password = password;
+    user.password = password; // o hook do model atualiza passwordChangedAt
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
-    user.passwordChangedAt = new Date();
+    user.refreshTokenHash = undefined; // encerra sessões existentes
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
     await user.save();
+
+    audit({
+      user: user._id, action: 'PASSWORD_RESET', resource: 'User', resourceId: user._id,
+      severity: 'warning', ipAddress: req.ip,
+    });
 
     res.json({ message: 'Senha redefinida com sucesso' });
   } catch (error) {
+    logger.error('Erro no reset-password:', error);
     res.status(500).json({ error: 'Erro ao redefinir senha' });
   }
 };
@@ -349,44 +449,19 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-exports.registerBiometricKey = async (req, res) => {
-  try {
-    const { publicKey } = req.body;
-    req.user.biometricEnabled = true;
-    req.user.biometricPublicKey = publicKey;
-    await req.user.save();
-
-    res.json({ message: 'Chave biométrica registrada com sucesso' });
-  } catch (error) {
-    res.status(500).json({ error: 'Erro ao registrar biometria' });
-  }
-};
-
-exports.loginBiometric = async (req, res) => {
-  try {
-    const { email, biometricSignature } = req.body;
-
-    const user = await User.findOne({ email, biometricEnabled: true });
-    if (!user) {
-      return res.status(401).json({ error: 'Biometria não configurada' });
-    }
-
-    // Verificar assinatura biométrica
-    // Em produção, validar com a chave pública armazenada
-    const tokens = generateTokens(user._id, user.role);
-    user.lastLogin = new Date();
-    user.refreshToken = tokens.refreshToken;
-    await user.save();
-
-    res.json({ message: 'Login biométrico realizado', ...tokens });
-  } catch (error) {
-    res.status(500).json({ error: 'Erro no login biométrico' });
-  }
-};
+// Biometria (WebAuthn) desativada até existir verificação criptográfica real
+// (challenge no servidor + verifyAuthenticationResponse com @simplewebauthn/server).
+// A versão anterior emitia tokens de qualquer email sem validar assinatura.
+const biometricNotAvailable = (req, res) => res.status(501).json({
+  error: 'Autenticação biométrica temporariamente indisponível',
+});
+exports.registerBiometricKey = biometricNotAvailable;
+exports.loginBiometric = biometricNotAvailable;
 
 exports.deleteAccount = async (req, res) => {
   try {
     req.user.status = 'blocked';
+    req.user.refreshTokenHash = undefined;
     await req.user.save();
 
     await AuditLog.create({

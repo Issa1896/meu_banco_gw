@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { verifyToken } = require('../utils/tokens');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 
@@ -10,7 +10,8 @@ const authenticate = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Só tokens do tipo "access" são aceitos (refresh/MFA são rejeitados)
+    const decoded = verifyToken(token, 'access');
 
     const user = await User.findById(decoded.id).select('-password -twoFactorSecret');
     if (!user) {
@@ -45,7 +46,7 @@ const authorize = (...roles) => {
         severity: 'warning',
         status: 'failure',
         ipAddress: req.ip,
-      });
+      }).catch(() => {});
       return res.status(403).json({ error: 'Acesso não autorizado' });
     }
     next();
@@ -57,8 +58,9 @@ const optionalAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select('-password -twoFactorSecret');
+      const decoded = verifyToken(token, 'access');
+      const user = await User.findById(decoded.id).select('-password -twoFactorSecret');
+      if (user && user.status === 'active') req.user = user;
     }
   } catch (e) { /* ignore */ }
   next();

@@ -23,7 +23,12 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Rotas de autenticação (login, 2FA, refresh...) devolvem 401 por credencial
+    // errada; nelas não se tenta refresh nem redireciona.
+    const isAuthRoute = originalRequest?.url?.startsWith('/auth/')
+      && !originalRequest.url.startsWith('/auth/profile');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRoute) {
       originalRequest._retry = true;
 
       try {
@@ -62,7 +67,7 @@ export const authAPI = {
   updateProfile: (data) => api.put('/auth/profile', data),
   setup2FA: () => api.get('/auth/2fa/setup'),
   enable2FA: (data) => api.post('/auth/2fa/enable', data),
-  disable2FA: () => api.post('/auth/2fa/disable'),
+  disable2FA: (data) => api.post('/auth/2fa/disable', data),
   registerBiometric: (data) => api.post('/auth/biometric/register', data),
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),

@@ -9,6 +9,7 @@ const i18nextBackend = require('i18next-fs-backend');
 const i18nextMiddleware = require('i18next-http-middleware');
 const path = require('path');
 
+const { validateEnv, getAllowedOrigins } = require('./config/env');
 const { connectDatabase } = require('./config/database');
 const { connectRedis } = require('./config/redis');
 const { setupSocket } = require('./config/socket');
@@ -25,6 +26,9 @@ const ticketRoutes = require('./routes/tickets');
 const adminRoutes = require('./routes/admin');
 
 const app = express();
+
+// Necessário atrás de proxy/load balancer para req.ip e rate limit corretos
+if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
 const server = http.createServer(app);
 
 // i18n setup
@@ -40,14 +44,19 @@ i18next.use(i18nextBackend).use(i18nextMiddleware.LanguageDetector).init({
 
 // Middleware globais
 app.use(securityHeaders);
+const allowedOrigins = getAllowedOrigins();
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  // Lista explícita de origens: "*" com credentials é proibido
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(null, false);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
 }));
 app.use(compression());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.use(i18nextMiddleware.handle(i18next));
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
 app.use('/api', apiLimiter);
@@ -58,9 +67,6 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    version: '1.0.0',
-    app: 'MeuBanco GW - Guiné-Bissau',
   });
 });
 
@@ -81,6 +87,7 @@ const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {
   try {
+    validateEnv();
     await connectDatabase();
     await connectRedis();
 
@@ -97,6 +104,8 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = { app, server };

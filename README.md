@@ -12,10 +12,11 @@ Sistema completo de pagamentos e transferências monetárias com suporte a Orang
 - Carteira interna MeuBanco
 
 ### 🔒 Segurança
-- Autenticação biométrica (WebAuthn)
-- Autenticação de dois fatores (2FA) via TOTP
-- Criptografia de ponta a ponta (AES-256-GCM)
-- Rate limiting e proteção contra brute-force
+- Autenticação de dois fatores (2FA) via TOTP, com segredo cifrado (AES-256-GCM) e etapa de senha vinculada por token de curta duração
+- Tokens JWT tipados (acesso 15 min / refresh com rotação e detecção de reuso / MFA 5 min)
+- Redefinição de senha por email com token aleatório guardado só como hash
+- Rate limiting e bloqueio temporário contra força bruta (login e 2FA)
+- 🚧 Autenticação biométrica (WebAuthn) — em desenvolvimento, desativada
 - Logs de auditoria completos
 - Dispositivos confiáveis
 
@@ -92,6 +93,18 @@ npm install
 npm run dev
 ```
 
+### Contas de desenvolvimento
+
+Sem MongoDB local, o backend sobe um replica set em memória (só fora de produção) com:
+
+| Email | Senha padrão |
+|---|---|
+| `admin@meubanco.gw` | `Admin123!` (ou `SEED_ADMIN_PASSWORD`) |
+| `teste@meubanco.gw` | `Teste123!` (ou `SEED_USER_PASSWORD`) |
+
+Em produção (`NODE_ENV=production`) o servidor não sobe sem MongoDB e sem os segredos
+`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_MFA_SECRET`, `ENCRYPTION_KEY` e `FRONTEND_URL`.
+
 ### 3. Acessar
 - Frontend: http://localhost:5173
 - API: http://localhost:3000/api
@@ -129,13 +142,16 @@ meu-banco/
 ### Autenticação
 - `POST /api/auth/register` - Criar conta
 - `POST /api/auth/login` - Login
-- `POST /api/auth/verify-2fa` - Verificar 2FA
+- `POST /api/auth/verify-2fa` - Verificar 2FA (`{ mfaToken, token }`)
 - `POST /api/auth/logout` - Logout
 - `GET /api/auth/profile` - Perfil
 - `PUT /api/auth/profile` - Atualizar perfil
 - `GET /api/auth/2fa/setup` - Setup 2FA
-- `POST /api/auth/2fa/enable` - Ativar 2FA
-- `POST /api/auth/biometric/register` - Registrar biometria
+- `POST /api/auth/2fa/enable` - Ativar 2FA (`{ token }`)
+- `POST /api/auth/2fa/disable` - Desativar 2FA (`{ password, token }`)
+- `POST /api/auth/refresh-token` - Renovar tokens (rotação)
+- `POST /api/auth/forgot-password` - Solicitar redefinição (sempre 200)
+- `POST /api/auth/reset-password` - Redefinir senha (`{ token, password }`)
 
 ### Transações
 - `POST /api/transactions/transfer` - Nova transferência

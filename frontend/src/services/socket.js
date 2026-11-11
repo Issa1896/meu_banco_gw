@@ -8,7 +8,8 @@ export const connectSocket = () => {
   if (!token || socket?.connected) return socket;
 
   socket = io('/', {
-    auth: { token },
+    // Função: a cada reconexão lê o token atual (o access token expira em 15 min)
+    auth: (cb) => cb({ token: Cookies.get('accessToken') || localStorage.getItem('accessToken') }),
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 10,

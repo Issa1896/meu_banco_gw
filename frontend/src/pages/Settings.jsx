@@ -13,6 +13,8 @@ export default function Settings() {
   const [twoFAQR, setTwoFAQR] = useState('');
   const [twoFASecret, setTwoFASecret] = useState('');
   const [twoFAToken, setTwoFAToken] = useState('');
+  const [showDisable2FA, setShowDisable2FA] = useState(false);
+  const [disableForm, setDisableForm] = useState({ password: '', token: '' });
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
@@ -47,36 +49,30 @@ export default function Settings() {
 
   const handleEnable2FA = async () => {
     try {
-      await authAPI.enable2FA({ secret: twoFASecret, token: twoFAToken });
+      // O segredo fica no servidor; só o código é enviado
+      await authAPI.enable2FA({ token: twoFAToken });
       toast.success('2FA ativado com sucesso');
       setShow2FASetup(false);
+      setTwoFASecret('');
+      setTwoFAToken('');
       updateUser({ twoFactorEnabled: true });
-    } catch {
-      toast.error('Código inválido');
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Código inválido');
     }
   };
 
   const handleDisable2FA = async () => {
     try {
-      await authAPI.disable2FA();
+      await authAPI.disable2FA(disableForm);
       toast.success('2FA desativado');
       updateUser({ twoFactorEnabled: false });
-    } catch {
-      toast.error('Erro ao desativar');
+      setShowDisable2FA(false);
+      setDisableForm({ password: '', token: '' });
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Erro ao desativar');
     }
   };
 
-  const handleBiometricRegister = async () => {
-    try {
-      // Em produção: usar WebAuthn API real
-      const mockKey = `bio-${Date.now()}`;
-      await authAPI.registerBiometric({ publicKey: mockKey });
-      toast.success('Biometria registrada com sucesso');
-      updateUser({ biometricEnabled: true });
-    } catch {
-      toast.error('Erro ao registrar biometria');
-    }
-  };
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
@@ -148,11 +144,43 @@ export default function Settings() {
             <p className="text-sm text-gray-500">Proteja sua conta com 2FA</p>
           </div>
           {user?.twoFactorEnabled ? (
-            <button onClick={handleDisable2FA} className="btn-danger text-sm">Desativar 2FA</button>
+            <button onClick={() => setShowDisable2FA((v) => !v)} className="btn-danger text-sm">Desativar 2FA</button>
           ) : (
             <button onClick={handleSetup2FA} className="btn-primary text-sm">Ativar 2FA</button>
           )}
         </div>
+
+        {showDisable2FA && (
+          <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg space-y-3 animate-fade-in">
+            <h3 className="font-medium">Confirmar desativação do 2FA</h3>
+            <p className="text-sm text-gray-500">Informe sua senha e o código atual do app autenticador.</p>
+            <input
+              type="password"
+              className="input-field w-full"
+              value={disableForm.password}
+              onChange={(e) => setDisableForm({ ...disableForm, password: e.target.value })}
+              placeholder="Senha"
+              autoComplete="current-password"
+            />
+            <div className="flex gap-3">
+              <input
+                className="input-field flex-1 text-center tracking-widest"
+                value={disableForm.token}
+                onChange={(e) => setDisableForm({ ...disableForm, token: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                placeholder="000000"
+                maxLength={6}
+                inputMode="numeric"
+              />
+              <button
+                onClick={handleDisable2FA}
+                className="btn-danger"
+                disabled={!disableForm.password || disableForm.token.length !== 6}
+              >
+                Desativar
+              </button>
+            </div>
+          </div>
+        )}
 
         {show2FASetup && (
           <div className="p-4 bg-primary-50 dark:bg-primary-900/20 rounded-lg space-y-4 animate-fade-in">
@@ -179,8 +207,8 @@ export default function Settings() {
             <h3 className="font-medium">Login Biométrico</h3>
             <p className="text-sm text-gray-500">Use sua digital para acessar</p>
           </div>
-          <button onClick={handleBiometricRegister} className={`text-sm ${user?.biometricEnabled ? 'btn-secondary' : 'btn-primary'}`}>
-            {user?.biometricEnabled ? '✅ Ativo' : 'Ativar'}
+          <button disabled className="text-sm btn-secondary opacity-60 cursor-not-allowed" title="Em desenvolvimento (WebAuthn)">
+            Em breve
           </button>
         </div>
       </div>

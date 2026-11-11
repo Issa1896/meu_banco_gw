@@ -7,7 +7,7 @@ export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [show2FA, setShow2FA] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState('');
-  const [userId, setUserId] = useState('');
+  const [mfaToken, setMfaToken] = useState('');
   const [loading, setLoading] = useState(false);
   const { login, verify2FA } = useAuth();
   const navigate = useNavigate();
@@ -19,7 +19,7 @@ export default function Login() {
       const result = await login(form);
       if (result.requires2FA) {
         setShow2FA(true);
-        setUserId(result.userId);
+        setMfaToken(result.mfaToken);
       } else {
         toast.success('Login realizado com sucesso!');
         navigate('/dashboard');
@@ -35,7 +35,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      await verify2FA({ userId, token: twoFactorCode });
+      await verify2FA({ mfaToken, token: twoFactorCode });
       toast.success('Login verificado com sucesso!');
       navigate('/dashboard');
     } catch (error) {

@@ -1,33 +1,43 @@
 const socketIO = require('socket.io');
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const { verifyToken } = require('../utils/tokens');
+const { getAllowedOrigins } = require('./env');
+
+const ADMIN_ROOM = 'admin:room';
+const ADMIN_ROLES = ['admin', 'superadmin'];
+const MAX_SUPPORT_MESSAGE = 2000;
 
 let io;
 
 const setupSocket = (server) => {
   io = socketIO(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      origin: getAllowedOrigins(),
       methods: ['GET', 'POST'],
       credentials: true,
     },
     pingTimeout: 60000,
     pingInterval: 25000,
+    maxHttpBufferSize: 1e5, // 100 KB por mensagem
   });
 
-  // Autenticação via token
+  // Autenticação via token de acesso (refresh/MFA são rejeitados)
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token || socket.handshake.query.token;
+      const token = socket.handshake.auth?.token;
       if (!token) {
         return next(new Error('Token de autenticação necessário'));
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = verifyToken(token, 'access');
       const user = await User.findById(decoded.id).select('-password');
-      if (!user) {
-        return next(new Error('Usuário não encontrado'));
+      if (!user || user.status !== 'active') {
+        return next(new Error('Usuário não autorizado'));
+      }
+
+      if (user.passwordChangedAt && decoded.iat < user.passwordChangedAt.getTime() / 1000) {
+        return next(new Error('Token expirado'));
       }
 
       socket.user = user;
@@ -38,43 +48,38 @@ const setupSocket = (server) => {
   });
 
   io.on('connection', (socket) => {
-    logger.info(`Socket conectado: ${socket.user.email}`);
+    const userId = socket.user._id.toString();
+    logger.info(`Socket conectado: ${userId}`);
 
-    // Entrar em salas pessoais
-    socket.join(`user:${socket.user._id}`);
-    socket.join(`role:${socket.user.role}`);
+    socket.join(`user:${userId}`);
+    if (ADMIN_ROLES.includes(socket.user.role)) {
+      socket.join(ADMIN_ROOM);
+    }
 
-    // Atualizar status online
-    socket.user.lastLogin = new Date();
-    socket.user.save().catch(() => {});
+    User.updateOne({ _id: socket.user._id }, { lastSeenAt: new Date() }).catch(() => {});
 
-    // Eventos de transação
-    socket.on('transaction:status', (data) => {
-      io.to(`user:${data.userId}`).emit('transaction:update', data);
-    });
+    // Eventos de transação são emitidos SOMENTE pelo servidor (ver
+    // transactionController). O antigo handler "transaction:status" permitia que
+    // qualquer cliente enviasse eventos falsos para a sala de outro usuário.
 
-    // Notificações
     socket.on('notification:read', (notificationId) => {
-      io.to(`user:${socket.user._id}`).emit('notification:updated', { notificationId });
+      if (typeof notificationId !== 'string') return;
+      io.to(`user:${userId}`).emit('notification:updated', { notificationId });
     });
 
-    // Chat de suporte
     socket.on('support:message', (data) => {
-      io.to(`role:admin`).emit('support:new', {
-        userId: socket.user._id,
+      const message = typeof data?.message === 'string' ? data.message.trim() : '';
+      if (!message || message.length > MAX_SUPPORT_MESSAGE) return;
+      io.to(ADMIN_ROOM).emit('support:new', {
+        userId,
         userName: socket.user.name,
-        message: data.message,
+        message,
         timestamp: new Date(),
       });
     });
 
-    // Admin - escutar tickets
-    if (['admin', 'superadmin'].includes(socket.user.role)) {
-      socket.join('admin:room');
-    }
-
     socket.on('disconnect', () => {
-      logger.info(`Socket desconectado: ${socket.user.email}`);
+      logger.info(`Socket desconectado: ${userId}`);
     });
   });
 

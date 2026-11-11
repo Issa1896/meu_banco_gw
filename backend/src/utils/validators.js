@@ -1,13 +1,17 @@
 const { body, param, query } = require('express-validator');
 
+const passwordRule = (field = 'password') => body(field)
+  .isString().withMessage('Senha inválida')
+  .isLength({ min: 8, max: 128 }).withMessage('Senha deve ter entre 8 e 128 caracteres')
+  .matches(/[A-Z]/).withMessage('Senha deve conter uma letra maiúscula')
+  .matches(/[a-z]/).withMessage('Senha deve conter uma letra minúscula')
+  .matches(/[0-9]/).withMessage('Senha deve conter um número');
+
 const registerValidator = [
   body('name').trim().notEmpty().withMessage('Nome é obrigatório'),
   body('email').isEmail().withMessage('Email inválido').normalizeEmail(),
   body('phone').matches(/^(\+245)?[0-9]{7,9}$/).withMessage('Telefone inválido para Guiné-Bissau'),
-  body('password').isLength({ min: 8 }).withMessage('Senha deve ter no mínimo 8 caracteres')
-    .matches(/[A-Z]/).withMessage('Senha deve conter uma letra maiúscula')
-    .matches(/[a-z]/).withMessage('Senha deve conter uma letra minúscula')
-    .matches(/[0-9]/).withMessage('Senha deve conter um número'),
+  passwordRule(),
   body('documentId').optional().trim().notEmpty(),
 ];
 
@@ -33,8 +37,14 @@ const ibanValidator = [
   body('recipientName').trim().notEmpty().withMessage('Nome do destinatário obrigatório'),
 ];
 
+const resetPasswordValidator = [
+  body('token').isString().notEmpty().withMessage('Token é obrigatório'),
+  passwordRule(),
+];
+
 module.exports = {
   registerValidator,
+  resetPasswordValidator,
   transferValidator,
   pixValidator,
   ibanValidator,

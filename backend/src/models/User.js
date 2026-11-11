@@ -19,13 +19,18 @@ const userSchema = new mongoose.Schema({
 
   // 2FA
   twoFactorEnabled: { type: Boolean, default: false },
-  twoFactorSecret: { type: String },
+  twoFactorSecret: { type: String, select: false }, // cifrado (AES-256-GCM)
+  twoFactorPendingSecret: { type: String, select: false }, // cifrado, durante o setup
+  twoFactorPendingExpires: { type: Date, select: false },
+  twoFactorFailedAttempts: { type: Number, default: 0 },
+  twoFactorLockUntil: { type: Date },
   twoFactorMethod: { type: String, enum: ['app', 'sms', 'email'] },
 
   // Segurança
   loginAttempts: { type: Number, default: 0 },
   lockUntil: { type: Date },
   lastLogin: { type: Date },
+  lastSeenAt: { type: Date },
   devices: [{
     deviceId: String,
     name: String,
@@ -73,21 +78,21 @@ const userSchema = new mongoose.Schema({
     postalCode: String,
   },
 
-  refreshToken: { type: String },
+  refreshTokenHash: { type: String, select: false }, // SHA-256 do refresh token atual
   passwordChangedAt: Date,
-  passwordResetToken: String,
-  passwordResetExpires: Date,
+  passwordResetToken: { type: String, select: false }, // SHA-256 do token enviado por email
+  passwordResetExpires: { type: Date, select: false },
 
 }, { timestamps: true });
 
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
-userSchema.index({ accountNumber: 1 });
+// email, phone e accountNumber já têm índice por serem "unique"
+userSchema.index({ passwordResetToken: 1 }, { sparse: true });
 userSchema.index({ status: 1 });
 
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
+  if (!this.isNew) this.passwordChangedAt = new Date(Date.now() - 1000);
   next();
 });
 
@@ -103,7 +108,14 @@ userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.twoFactorSecret;
-  delete obj.refreshToken;
+  delete obj.twoFactorPendingSecret;
+  delete obj.twoFactorPendingExpires;
+  delete obj.twoFactorFailedAttempts;
+  delete obj.twoFactorLockUntil;
+  delete obj.refreshTokenHash;
+  delete obj.biometricPublicKey;
+  delete obj.loginAttempts;
+  delete obj.lockUntil;
   delete obj.passwordResetToken;
   delete obj.passwordResetExpires;
   return obj;

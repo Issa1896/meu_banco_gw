@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { isIntegerXOF } = require('../utils/money');
 
 const transactionSchema = new mongoose.Schema({
   transactionRef: { type: String, required: true, unique: true },
@@ -18,13 +19,24 @@ const transactionSchema = new mongoose.Schema({
     required: true,
   },
 
-  amount: { type: Number, required: true },
-  fee: { type: Number, default: 0 },
-  totalAmount: { type: Number },
-  currency: { type: String, default: 'XOF', enum: ['XOF', 'EUR', 'USD', 'BRL'] },
+  // Valores de liquidação: SEMPRE inteiros em XOF (moeda das carteiras).
+  // amount = o que o destinatário recebe; fee = taxa; totalAmount = débito do remetente.
+  amount: { type: Number, required: true, min: 1, validate: isIntegerXOF },
+  fee: { type: Number, default: 0, min: 0, validate: isIntegerXOF },
+  totalAmount: { type: Number, required: true, min: 1, validate: isIntegerXOF },
+  currency: { type: String, default: 'XOF', enum: ['XOF'] },
+
+  // O que o usuário digitou e a taxa de câmbio aplicada pelo servidor
+  originalAmount: { type: Number },
+  originalCurrency: { type: String, enum: ['XOF', 'EUR', 'USD', 'BRL'] },
   exchangeRate: { type: Number },
-  convertedAmount: { type: Number },
-  convertedCurrency: { type: String },
+
+  // Idempotência: a mesma chave do mesmo remetente nunca gera 2 transferências
+  idempotencyKey: { type: String, maxlength: 128 },
+  requestHash: { type: String },
+
+  // Estorno: a transação "refund" aponta para a original (e vice-versa)
+  relatedTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
 
   status: {
     type: String,
@@ -57,6 +69,8 @@ const transactionSchema = new mongoose.Schema({
     iban: String,
     swift: String,
     bankReference: String,
+    provider: String,
+    simulated: Boolean,
   },
 
   // Metadata
@@ -85,7 +99,11 @@ const transactionSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-transactionSchema.index({ transactionRef: 1 });
+// transactionRef já é indexado por ser "unique"
+transactionSchema.index(
+  { sender: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+);
 transactionSchema.index({ sender: 1, createdAt: -1 });
 transactionSchema.index({ recipient: 1, createdAt: -1 });
 transactionSchema.index({ status: 1 });
@@ -93,9 +111,6 @@ transactionSchema.index({ type: 1 });
 transactionSchema.index({ createdAt: -1 });
 
 transactionSchema.pre('save', function (next) {
-  if (this.isModified('amount') && !this.totalAmount) {
-    this.totalAmount = this.amount + (this.fee || 0);
-  }
   if (this.isModified('status') && this.status === 'completed' && !this.completedAt) {
     this.completedAt = new Date();
   }

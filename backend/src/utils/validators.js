@@ -15,12 +15,21 @@ const registerValidator = [
   body('documentId').optional().trim().notEmpty(),
 ];
 
+const TRANSFER_CATEGORIES = [
+  'alimentacao', 'transporte', 'moradia', 'saude', 'educacao', 'lazer',
+  'servicos', 'compras', 'transferencia', 'salario', 'investimento', 'outros',
+];
+
+// Valor, moeda, limites e taxa são validados em utils/money.js (no servidor)
 const transferValidator = [
-  body('recipientAccount').trim().notEmpty().withMessage('Conta do destinatário é obrigatória'),
-  body('amount').isFloat({ min: 50 }).withMessage('Valor mínimo é 50 XOF'),
-  body('currency').isIn(['XOF', 'EUR', 'USD', 'BRL']).withMessage('Moeda não suportada'),
-  body('description').optional().trim().isLength({ max: 200 }),
-  body('paymentMethod').isIn(['orange_money', 'mobile_money', 'bank_transfer', 'pix', 'iban'])
+  body('recipientAccount').isString().trim().notEmpty().isLength({ max: 40 })
+    .withMessage('Conta do destinatário é obrigatória'),
+  body('amount').exists().withMessage('Valor é obrigatório')
+    .custom((v) => typeof v === 'number' || typeof v === 'string').withMessage('Valor inválido'),
+  body('currency').optional().isIn(['XOF', 'EUR', 'USD', 'BRL']).withMessage('Moeda não suportada'),
+  body('description').optional().isString().trim().isLength({ max: 200 }),
+  body('category').optional().isIn(TRANSFER_CATEGORIES).withMessage('Categoria inválida'),
+  body('paymentMethod').isIn(['wallet', 'orange_money', 'mobile_money', 'bank_transfer', 'pix', 'iban'])
     .withMessage('Método de pagamento inválido'),
 ];
 

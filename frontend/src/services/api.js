@@ -75,13 +75,16 @@ export const authAPI = {
 
 // API Transações
 export const transactionAPI = {
-  transfer: (data) => api.post('/transactions/transfer', data),
+  // A chave de idempotência evita transferência duplicada em reenvio/clique duplo
+  transfer: (data, idempotencyKey) => api.post('/transactions/transfer', data, {
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+  }),
+  quote: (params) => api.get('/transactions/quote', { params }),
   list: (params) => api.get('/transactions', { params }),
   getById: (id) => api.get(`/transactions/${id}`),
   getStats: () => api.get('/transactions/stats'),
   getBalance: () => api.get('/transactions/balance'),
   getMonthlyReport: (params) => api.get('/transactions/monthly-report', { params }),
-  reverse: (id, data) => api.post(`/transactions/${id}/reverse`, data),
   getReceipt: (id) => api.get(`/transactions/${id}/receipt`, { responseType: 'blob' }),
 };
 

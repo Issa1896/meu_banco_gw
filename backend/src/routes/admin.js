@@ -15,6 +15,7 @@ router.put('/users/:id/kyc/reject', adminController.rejectKYC);
 router.get('/tickets', adminController.listTickets);
 router.post('/tickets/:id/reply', adminController.replyTicketAdmin);
 router.get('/transactions', adminController.getTransactions);
+router.post('/transactions/:id/reverse', adminController.reverseTransaction);
 router.get('/audit-logs', adminController.getAuditLogs);
 router.get('/analytics', adminController.getSystemAnalytics);
 

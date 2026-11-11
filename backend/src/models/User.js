@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { isIntegerXOF } = require('../utils/money');
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -8,8 +9,10 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   documentId: { type: String, sparse: true },
   accountNumber: { type: String, unique: true, sparse: true },
-  balance: { type: Number, default: 0, min: 0 },
-  currency: { type: String, default: 'XOF', enum: ['XOF', 'EUR', 'USD', 'BRL'] },
+  // Saldo inteiro em XOF. Só deve ser alterado com $inc condicional
+  // (ver services/transferService.js), nunca com leitura + save().
+  balance: { type: Number, default: 0, min: 0, validate: isIntegerXOF },
+  currency: { type: String, default: 'XOF', enum: ['XOF'] },
   role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user' },
   status: { type: String, enum: ['pending', 'active', 'suspended', 'blocked'], default: 'pending' },
 

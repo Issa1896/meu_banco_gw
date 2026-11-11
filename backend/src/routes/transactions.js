@@ -9,12 +9,13 @@ const { transferLimiter } = require('../middleware/security');
 router.use(authenticate);
 
 router.post('/transfer', transferLimiter, transferValidator, transactionController.createTransfer);
+router.get('/quote', transactionController.getQuote);
 router.get('/', transactionController.getTransactions);
 router.get('/stats', transactionController.getStats);
 router.get('/balance', transactionController.getBalance);
 router.get('/monthly-report', transactionController.getMonthlyReport);
 router.get('/:id', transactionController.getTransactionById);
-router.post('/:id/reverse', transactionController.reverseTransaction);
+// Estorno: somente admin (POST /api/admin/transactions/:id/reverse)
 router.get('/:id/receipt', receiptController.generateReceipt);
 
 module.exports = router;

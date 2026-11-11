@@ -20,6 +20,13 @@ Sistema completo de pagamentos e transferências monetárias com suporte a Orang
 - Logs de auditoria completos
 - Dispositivos confiáveis
 
+### 💱 Regras de dinheiro
+- Carteiras em **XOF**, com valores inteiros (o franco CFA não tem centavos)
+- Câmbio feito no servidor: EUR pela paridade fixa (1 EUR = 655,957 XOF); USD/BRL só com cotação configurada
+- Débito atômico: saldo conferido e debitado numa única operação, dentro de transação MongoDB
+- Taxas: carteira e banco 1% · Orange Money 1,2% · Mobile Money 1,5% · PIX/IBAN 2,5% (arredondadas para cima)
+- Estorno somente por administrador, registrado como nova transação `refund`
+
 ### 📊 Gestão Financeira
 - Dashboard em tempo real
 - Orçamentos mensais por categoria
@@ -154,7 +161,8 @@ meu-banco/
 - `POST /api/auth/reset-password` - Redefinir senha (`{ token, password }`)
 
 ### Transações
-- `POST /api/transactions/transfer` - Nova transferência
+- `GET /api/transactions/quote?amount=&currency=&paymentMethod=` - Valor em XOF, taxa e total exatos
+- `POST /api/transactions/transfer` - Nova transferência (header opcional `Idempotency-Key`: reenviar com a mesma chave não duplica)
 - `GET /api/transactions` - Listar transações
 - `GET /api/transactions/balance` - Saldo
 - `GET /api/transactions/stats` - Estatísticas
@@ -167,6 +175,7 @@ meu-banco/
 - `PUT /api/admin/users/:id/status` - Alterar status
 - `PUT /api/admin/users/:id/kyc/approve` - Aprovar KYC
 - `GET /api/admin/transactions` - Todas transações
+- `POST /api/admin/transactions/:id/reverse` - Estornar transferência (`{ reason }`)
 - `GET /api/admin/tickets` - Tickets de suporte
 - `GET /api/admin/analytics` - Analytics
 - `GET /api/admin/audit-logs` - Logs de auditoria

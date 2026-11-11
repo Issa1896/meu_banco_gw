@@ -42,10 +42,15 @@ const passwordResetLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Por usuário (a rota exige login): em redes móveis com CGNAT muitos
+// clientes compartilham o mesmo IP, e o limite por IP bloquearia inocentes.
 const transferLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 10,
+  keyGenerator: (req) => (req.user ? `user:${req.user._id}` : `ip:${req.ip}`),
   message: { error: 'Muitas transferências. Aguarde um momento' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 const validate2FA = [

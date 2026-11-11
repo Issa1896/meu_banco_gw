@@ -97,6 +97,14 @@ exports.generateReceipt = async (req, res) => {
     y += 25;
 
     y = addField('Valor', formatCurrency(transaction.amount, transaction.currency), leftX, y);
+    if (transaction.originalCurrency && transaction.originalCurrency !== transaction.currency) {
+      y = addField(
+        'Valor original / câmbio',
+        `${formatCurrency(transaction.originalAmount, transaction.originalCurrency)} × ${transaction.exchangeRate}`,
+        leftX,
+        y,
+      );
+    }
     y = addField('Taxa', formatCurrency(transaction.fee || 0, transaction.currency), leftX, y);
     doc.fontSize(12).font('Helvetica-Bold')
       .text(`Total: ${formatCurrency(transaction.totalAmount || transaction.amount, transaction.currency)}`, leftX, y + 10);

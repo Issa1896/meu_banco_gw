@@ -1,4 +1,10 @@
 import { useState } from 'react';
+
+const newIdempotencyKey = () => (crypto.randomUUID
+  ? crypto.randomUUID()
+  : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`);
+
+const fmtXOF = (v) => `${Number(v || 0).toLocaleString('pt-PT')} XOF`;
 import { useNavigate } from 'react-router-dom';
 import { transactionAPI } from '../services/api';
 import toast from 'react-hot-toast';
@@ -28,6 +34,9 @@ export default function NewTransfer() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [quote, setQuote] = useState(null);
+  // Gerada ao entrar na confirmação e reutilizada em reenvios do MESMO pedido
+  const [idempotencyKey, setIdempotencyKey] = useState(null);
   const [form, setForm] = useState({
     recipientAccount: '',
     amount: '',
@@ -41,15 +50,30 @@ export default function NewTransfer() {
     e.preventDefault();
     if (step === 1) { setStep(2); return; }
     if (step === 2 && !form.paymentMethod) { toast.error('Selecione um método de pagamento'); return; }
-    if (step === 2) { setStep(3); return; }
+    if (step === 2) {
+      setLoading(true);
+      try {
+        const { data } = await transactionAPI.quote({
+          amount: form.amount, currency: form.currency, paymentMethod: form.paymentMethod,
+        });
+        setQuote(data.quote);
+        setIdempotencyKey(newIdempotencyKey());
+        setStep(3);
+      } catch (error) {
+        toast.error(error.response?.data?.error || 'Não foi possível calcular a taxa');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     setLoading(true);
     try {
-      await transactionAPI.transfer({
+      const { data } = await transactionAPI.transfer({
         ...form,
-        amount: parseFloat(form.amount),
-      });
-      toast.success('Transferência realizada com sucesso!');
+        amount: Number(String(form.amount).replace(',', '.')),
+      }, idempotencyKey);
+      toast.success(data.message || 'Transferência realizada com sucesso!');
       navigate('/transactions');
     } catch (error) {
       toast.error(error.response?.data?.error || 'Erro ao realizar transferência');
@@ -156,7 +180,9 @@ export default function NewTransfer() {
 
             <div className="flex gap-3">
               <button type="button" onClick={() => setStep(1)} className="btn-secondary flex-1">Voltar</button>
-              <button type="submit" className="btn-primary flex-1">Continuar</button>
+              <button type="submit" disabled={loading} className="btn-primary flex-1">
+                {loading ? 'Calculando...' : 'Continuar'}
+              </button>
             </div>
           </div>
         )}
@@ -173,8 +199,14 @@ export default function NewTransfer() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Valor</span>
-                <span className="font-bold text-lg">{parseFloat(form.amount).toLocaleString()} {form.currency}</span>
+                <span className="font-bold text-lg">{Number(quote?.amount ?? form.amount).toLocaleString('pt-PT')} {form.currency}</span>
               </div>
+              {quote && quote.currency !== 'XOF' && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Câmbio</span>
+                  <span className="font-medium">1 {quote.currency} = {quote.exchangeRate} XOF → {fmtXOF(quote.amountXOF)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-500">Método</span>
                 <span className="font-medium capitalize">{form.paymentMethod.replace(/_/g, ' ')}</span>
@@ -190,13 +222,17 @@ export default function NewTransfer() {
                 </div>
               )}
               <div className="border-t border-gray-200 dark:border-gray-600 pt-3 flex justify-between">
-                <span className="font-bold">Taxa (estimada)</span>
-                <span className="font-bold text-red-600">{Math.round(parseFloat(form.amount || 0) * 0.01).toLocaleString()} XOF</span>
+                <span className="text-gray-500">Taxa ({((quote?.feeRate || 0) * 100).toLocaleString('pt-PT')}%)</span>
+                <span className="font-medium text-red-600">{fmtXOF(quote?.fee)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-bold">Total debitado</span>
+                <span className="font-bold text-lg">{fmtXOF(quote?.total)}</span>
               </div>
             </div>
 
             <div className="flex gap-3">
-              <button type="button" onClick={() => setStep(2)} className="btn-secondary flex-1">Voltar</button>
+              <button type="button" onClick={() => { setStep(2); setQuote(null); setIdempotencyKey(null); }} className="btn-secondary flex-1">Voltar</button>
               <button type="submit" disabled={loading} className="btn-primary flex-1">
                 {loading ? 'Processando...' : 'Confirmar e Enviar'}
               </button>

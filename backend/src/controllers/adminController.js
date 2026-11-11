@@ -3,6 +3,13 @@ const Transaction = require('../models/Transaction');
 const AuditLog = require('../models/AuditLog');
 const Ticket = require('../models/Ticket');
 const Notification = require('../models/Notification');
+const logger = require('../utils/logger');
+const transferService = require('../services/transferService');
+const { MoneyError } = require('../utils/money');
+const { asString, pagination, escapeRegex } = require('../utils/query');
+
+const ROLE_RANK = { user: 0, admin: 1, superadmin: 2 };
+const USER_STATUSES = ['pending', 'active', 'suspended', 'blocked'];
 
 exports.getDashboard = async (req, res) => {
   try {
@@ -43,28 +50,32 @@ exports.getDashboard = async (req, res) => {
 
 exports.listUsers = async (req, res) => {
   try {
-    const { page = 1, limit = 50, status, role, search } = req.query;
+    const { page, limit, skip } = pagination(req.query, { defaultLimit: 50 });
+    const status = asString(req.query.status);
+    const role = asString(req.query.role);
+    const search = asString(req.query.search, 100);
     const query = {};
     if (status) query.status = status;
     if (role) query.role = role;
     if (search) {
+      const pattern = escapeRegex(search);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
+        { name: { $regex: pattern, $options: 'i' } },
+        { email: { $regex: pattern, $options: 'i' } },
+        { phone: { $regex: pattern, $options: 'i' } },
       ];
     }
 
     const users = await User.find(query)
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .skip(skip)
+      .limit(limit);
 
     const total = await User.countDocuments(query);
 
     res.json({
       users,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / limit) },
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao listar usuários' });
@@ -89,15 +100,33 @@ exports.getUserById = async (req, res) => {
 exports.updateUserStatus = async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const user = await User.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    if (!USER_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Status inválido. Use: ${USER_STATUSES.join(', ')}` });
+    }
+
+    const target = await User.findById(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Usuário não encontrado' });
+    if (target._id.toString() === req.user._id.toString()) {
+      return res.status(403).json({ error: 'Não é possível alterar o próprio status' });
+    }
+    // Um admin só altera contas de nível inferior ao seu
+    if (ROLE_RANK[target.role] >= ROLE_RANK[req.user.role]) {
+      return res.status(403).json({ error: 'Sem permissão para alterar esta conta' });
+    }
+
+    target.status = status;
+    if (status !== 'active') target.refreshTokenHash = undefined; // encerra sessões
+    await target.save();
+    const user = target;
 
     await AuditLog.create({
       user: req.user._id,
       action: `USER_STATUS_${status.toUpperCase()}`,
       resource: 'User',
       resourceId: user._id,
-      details: { reason },
+      details: { reason, targetUser: user._id },
       severity: status === 'blocked' ? 'critical' : 'warning',
+      ipAddress: req.ip,
     });
 
     await Notification.create({
@@ -150,7 +179,9 @@ exports.rejectKYC = async (req, res) => {
 
 exports.listTickets = async (req, res) => {
   try {
-    const { status, priority, page = 1, limit = 50 } = req.query;
+    const { page, limit, skip } = pagination(req.query, { defaultLimit: 50 });
+    const status = asString(req.query.status);
+    const priority = asString(req.query.priority);
     const query = {};
     if (status) query.status = status;
     if (priority) query.priority = priority;
@@ -158,12 +189,12 @@ exports.listTickets = async (req, res) => {
     const tickets = await Ticket.find(query)
       .populate('user', 'name email phone')
       .sort({ priority: -1, createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .skip(skip)
+      .limit(limit);
 
     res.json({
       tickets,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total: await Ticket.countDocuments(query) },
+      pagination: { page, limit, total: await Ticket.countDocuments(query) },
     });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao listar tickets' });
@@ -189,22 +220,26 @@ exports.replyTicketAdmin = async (req, res) => {
 
 exports.getTransactions = async (req, res) => {
   try {
-    const { page = 1, limit = 50, status, type, startDate, endDate } = req.query;
+    const { page, limit, skip } = pagination(req.query, { defaultLimit: 50 });
+    const status = asString(req.query.status);
+    const type = asString(req.query.type);
+    const startDate = asString(req.query.startDate);
+    const endDate = asString(req.query.endDate);
     const query = {};
     if (status) query.status = status;
     if (type) query.type = type;
     if (startDate || endDate) {
       query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
+      if (startDate && !Number.isNaN(Date.parse(startDate))) query.createdAt.$gte = new Date(startDate);
+      if (endDate && !Number.isNaN(Date.parse(endDate))) query.createdAt.$lte = new Date(endDate);
     }
 
     const transactions = await Transaction.find(query)
       .populate('sender', 'name email')
       .populate('recipient', 'name email')
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .skip(skip)
+      .limit(limit);
 
     const total = await Transaction.countDocuments(query);
     const volume = await Transaction.aggregate([
@@ -215,7 +250,7 @@ exports.getTransactions = async (req, res) => {
     res.json({
       transactions,
       volume: volume[0]?.total || 0,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / limit) },
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao listar transações' });
@@ -224,7 +259,9 @@ exports.getTransactions = async (req, res) => {
 
 exports.getAuditLogs = async (req, res) => {
   try {
-    const { page = 1, limit = 50, action, severity } = req.query;
+    const { page, limit, skip } = pagination(req.query, { defaultLimit: 50 });
+    const action = asString(req.query.action);
+    const severity = asString(req.query.severity);
     const query = {};
     if (action) query.action = action;
     if (severity) query.severity = severity;
@@ -232,12 +269,12 @@ exports.getAuditLogs = async (req, res) => {
     const logs = await AuditLog.find(query)
       .populate('user', 'name email')
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .skip(skip)
+      .limit(limit);
 
     res.json({
       logs,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total: await AuditLog.countDocuments(query) },
+      pagination: { page, limit, total: await AuditLog.countDocuments(query) },
     });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao listar logs' });
@@ -276,5 +313,37 @@ exports.getSystemAnalytics = async (req, res) => {
     res.json({ monthlyStats, topMethods });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao gerar analytics' });
+  }
+};
+
+exports.reverseTransaction = async (req, res) => {
+  try {
+    const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 10 || reason.length > 500) {
+      return res.status(400).json({ error: 'Informe o motivo do estorno (10 a 500 caracteres)' });
+    }
+
+    const { original, refund } = await transferService.reverseTransfer({
+      transactionId: req.params.id,
+      adminId: req.user._id,
+      reason,
+    });
+
+    AuditLog.create({
+      user: req.user._id,
+      action: 'TRANSFER_REVERSED',
+      resource: 'Transaction',
+      resourceId: original._id,
+      details: { reason, refundId: refund._id, amountXOF: original.amount },
+      severity: 'critical',
+      ipAddress: req.ip,
+    }).catch((err) => logger.error('Falha no AuditLog:', err));
+
+    res.json({ message: 'Transação estornada com sucesso', transaction: original, refund });
+  } catch (error) {
+    if (error instanceof MoneyError) return res.status(error.statusCode).json({ error: error.message });
+    if (error.name === 'CastError') return res.status(400).json({ error: 'ID inválido' });
+    logger.error('Erro ao estornar transação:', error);
+    res.status(500).json({ error: 'Erro ao estornar transação' });
   }
 };

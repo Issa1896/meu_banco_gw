@@ -30,17 +30,6 @@ const formatCurrency = (amount, currency = 'XOF') => {
   }).format(amount);
 };
 
-const calculateFee = (amount, type) => {
-  const fees = {
-    transfer: amount * 0.01, // 1%
-    withdrawal: amount * 0.005, // 0.5%
-    mobile_money: amount * 0.015, // 1.5%
-    orange_money: amount * 0.012, // 1.2%
-    international: amount * 0.025, // 2.5%
-  };
-  return Math.round((fees[type] || 0.01) * 100) / 100;
-};
-
 const maskSensitiveData = (data) => {
   if (!data) return '';
   const str = String(data);
@@ -54,6 +43,5 @@ module.exports = {
   generateAccountNumber,
   generateQRCodeData,
   formatCurrency,
-  calculateFee,
   maskSensitiveData,
 };

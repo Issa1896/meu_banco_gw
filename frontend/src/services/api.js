@@ -128,6 +128,10 @@ export const adminAPI = {
   listTransactions: (params) => api.get('/admin/transactions', { params }),
   getAuditLogs: (params) => api.get('/admin/audit-logs', { params }),
   getAnalytics: () => api.get('/admin/analytics'),
+  ledgerReconciliation: () => api.get('/admin/ledger/reconciliation'),
+  ledgerTrialBalance: () => api.get('/admin/ledger/trial-balance'),
+  ledgerAdjustment: (data) => api.post('/admin/ledger/adjustments', data),
+  reverseTransaction: (id, data) => api.post(`/admin/transactions/${id}/reverse`, data),
 };
 
 export default api;

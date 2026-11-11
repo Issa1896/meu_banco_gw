@@ -48,8 +48,8 @@ async function seedInitialData() {
   if (existingAdmin) return;
 
   // Senhas vêm do .env; os padrões existem só para desenvolvimento local
-  // e NÃO são escritos no log.
-  await User.create({
+  // e NÃO são escritos no log. Saldos entram pelo livro-razão (abertura).
+  const admin = await User.create({
     name: 'Admin MeuBanco',
     email: 'admin@meubanco.gw',
     phone: '+245955000000',
@@ -58,10 +58,9 @@ async function seedInitialData() {
     status: 'active',
     kycStatus: 'verified',
     accountNumber: 'GW000000001',
-    balance: 1000000,
   });
 
-  await User.create({
+  const tester = await User.create({
     name: 'Usuário Teste',
     email: 'teste@meubanco.gw',
     phone: '+245955000001',
@@ -70,8 +69,22 @@ async function seedInitialData() {
     status: 'active',
     kycStatus: 'verified',
     accountNumber: 'GW000000002',
-    balance: 500000,
   });
+
+  const ledger = require('../services/ledgerService');
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      await ledger.postBalanceChange({
+        userId: admin._id, amount: 1000000, type: 'opening_balance', description: 'Saldo inicial (dev)',
+      }, session);
+      await ledger.postBalanceChange({
+        userId: tester._id, amount: 500000, type: 'opening_balance', description: 'Saldo inicial (dev)',
+      }, session);
+    });
+  } finally {
+    await session.endSession();
+  }
 
   logger.info('Dados de desenvolvimento criados: admin@meubanco.gw e teste@meubanco.gw (senhas em SEED_*_PASSWORD ou no README)');
 }

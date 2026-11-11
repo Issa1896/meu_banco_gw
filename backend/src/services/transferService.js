@@ -6,6 +6,7 @@ const Notification = require('../models/Notification');
 const { generateTransactionRef } = require('../utils/helpers');
 const { MoneyError, quote } = require('../utils/money');
 const { resolveSettlement } = require('./paymentProviders');
+const ledger = require('./ledgerService');
 
 const fmt = (xof) => `${Number(xof).toLocaleString('pt-PT')} XOF`;
 
@@ -39,7 +40,7 @@ const findReplay = async (senderId, idempotencyKey, requestHash) => {
  *
  * O saldo é verificado e debitado NUMA ÚNICA operação ($inc condicional a
  * balance >= total), dentro de uma transação MongoDB junto com o crédito,
- * o registro da transação e as notificações. Duas requisições simultâneas
+ * o registro da transação, o lançamento no livro-razão e as notificações. Duas requisições simultâneas
  * não conseguem gastar o mesmo saldo: a segunda não encontra saldo e falha,
  * e nada fica pela metade.
  */
@@ -110,6 +111,9 @@ const createTransfer = async ({
         deviceId: meta.deviceId,
       }], { session });
 
+      // Lançamento contábil na MESMA transação: ou tudo é gravado, ou nada
+      await ledger.postTransfer(tx, session);
+
       await Notification.insertMany([{
         user: senderId,
         type: 'transaction_sent',
@@ -178,6 +182,8 @@ const reverseTransfer = async ({ transactionId, adminId, reason }) => inTransact
     completedAt: new Date(),
     relatedTransaction: original._id,
   }], { session });
+
+  await ledger.postRefund(refund, adminId, session);
 
   original.relatedTransaction = refund._id;
   await original.save({ session });

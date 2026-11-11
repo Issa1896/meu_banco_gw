@@ -13,6 +13,7 @@ const { validateEnv, getAllowedOrigins } = require('./config/env');
 const { connectDatabase } = require('./config/database');
 const { connectRedis } = require('./config/redis');
 const { setupSocket } = require('./config/socket');
+const { scheduleReconciliation } = require('./jobs/reconciliation');
 const { securityHeaders, apiLimiter, sanitizeInput } = require('./middleware/security');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const logger = require('./utils/logger');
@@ -92,6 +93,7 @@ const startServer = async () => {
     await connectRedis();
 
     setupSocket(server);
+    scheduleReconciliation();
 
     server.listen(PORT, () => {
       logger.info(`Servidor rodando na porta ${PORT}`);

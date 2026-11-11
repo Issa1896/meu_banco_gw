@@ -8,6 +8,7 @@ const adminNavItems = [
   { to: '/admin/transactions', label: 'Transações', icon: '💳' },
   { to: '/admin/tickets', label: 'Tickets', icon: '🎫' },
   { to: '/admin/analytics', label: 'Analytics', icon: '📈' },
+  { to: '/admin/ledger', label: 'Livro-razão', icon: '📒' },
 ];
 
 export default function AdminLayout() {

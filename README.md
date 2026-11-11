@@ -27,6 +27,14 @@ Sistema completo de pagamentos e transferências monetárias com suporte a Orang
 - Taxas: carteira e banco 1% · Orange Money 1,2% · Mobile Money 1,5% · PIX/IBAN 2,5% (arredondadas para cima)
 - Estorno somente por administrador, registrado como nova transação `refund`
 
+### 📒 Livro-razão (partidas dobradas)
+- Todo movimento gera um lançamento imutável em `JournalEntry`, com débitos = créditos
+- Contas: `user:<id>` (carteira do cliente), `system:fees` (taxas), `system:opening` (saldos de abertura), `system:adjustments` (ajustes)
+- O lançamento é gravado na mesma transação MongoDB que altera os saldos: ou tudo, ou nada
+- `User.balance` é um espelho do razão; a conciliação diária confere os dois e registra divergências na auditoria
+- Erro nunca se apaga: corrige-se com novo lançamento (estorno ou ajuste)
+- Migração de saldos antigos: `npm run ledger:backfill` (simulação) e `npm run ledger:backfill -- --apply`
+
 ### 📊 Gestão Financeira
 - Dashboard em tempo real
 - Orçamentos mensais por categoria
@@ -161,6 +169,7 @@ meu-banco/
 - `POST /api/auth/reset-password` - Redefinir senha (`{ token, password }`)
 
 ### Transações
+- `GET /api/transactions/statement` - Extrato do cliente a partir do livro-razão
 - `GET /api/transactions/quote?amount=&currency=&paymentMethod=` - Valor em XOF, taxa e total exatos
 - `POST /api/transactions/transfer` - Nova transferência (header opcional `Idempotency-Key`: reenviar com a mesma chave não duplica)
 - `GET /api/transactions` - Listar transações
@@ -178,6 +187,10 @@ meu-banco/
 - `POST /api/admin/transactions/:id/reverse` - Estornar transferência (`{ reason }`)
 - `GET /api/admin/tickets` - Tickets de suporte
 - `GET /api/admin/analytics` - Analytics
+- `GET /api/admin/ledger/reconciliation` - Conciliação razão × saldos (409 se houver divergência)
+- `GET /api/admin/ledger/trial-balance` - Balancete
+- `GET /api/admin/ledger/accounts/:account/statement` - Extrato de qualquer conta
+- `POST /api/admin/ledger/adjustments` - Ajuste manual (somente superadmin; `{ userId, amount, reason }`)
 - `GET /api/admin/audit-logs` - Logs de auditoria
 
 ## Licença
